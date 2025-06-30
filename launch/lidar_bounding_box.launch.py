@@ -13,7 +13,7 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='lidar_bounding_box',
-            executable='lidar_bounding_box_node',
+            executable='lidar_bounding_box_main',
             name='lidar_bounding_box_node',
             output='screen',
             parameters=[config],

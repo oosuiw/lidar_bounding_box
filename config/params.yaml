@@ -1,8 +1,12 @@
 lidar_bounding_box_node:
   ros__parameters:
     input_yolo_topic: "/yolo_result"
-    input_camera_info_topic: "/camera_info"
-    input_point_cloud_topic: "/point_cloud"
+    input_camera_info_topic: "/sensing/camera/traffic_light/camera_info"
+    input_point_cloud_topic: "/ouster/points"
     output_bounding_box_topic: "/lidar_bounding_box"
-    camera_frame_id: "camera_link"
-    lidar_frame_id: "lidar_link"
+    camera_frame_id: "camera"
+    lidar_frame_id: "os_lidar"
+    max_distance_threshold: 50.0 # 더 많은 점 포함을 위해 복원 [주석]_KMS_250701
+    max_bbox_size: 5.0 # 현실적인 객체 크기로 조정
+    sor_mean_k: 50 # 이웃 점 수를 50으로 낮춤 [주석]_KMS_250701
+    sor_stddev_mul_thresh: 1.0 # 필터링 완화 [주석]_KMS_250701

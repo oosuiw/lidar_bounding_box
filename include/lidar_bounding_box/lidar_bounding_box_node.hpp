@@ -55,6 +55,10 @@ private:
   std::string lidar_frame_id_;
 
   Eigen::Matrix3d camera_k_matrix_;
+  double max_distance_threshold_; 
+  double max_bbox_size_; 
+  double sor_stddev_mul_thresh_; 
+  int sor_mean_k_;
 };
 
 #endif  // LIDAR_BOUNDING_BOX_NODE_HPP_

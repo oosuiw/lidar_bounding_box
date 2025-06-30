@@ -3,6 +3,7 @@
 #include <chrono>
 #include <Eigen/Dense>
 #include <pcl/common/common.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 
 using namespace std::chrono_literals;
 
@@ -15,6 +16,10 @@ LidarBoundingBoxNode::LidarBoundingBoxNode(const rclcpp::NodeOptions & options)
   this->declare_parameter<std::string>("output_bounding_box_topic", "/lidar_bounding_box");
   this->declare_parameter<std::string>("camera_frame_id", "camera_link");
   this->declare_parameter<std::string>("lidar_frame_id", "lidar_link");
+  this->declare_parameter<double>("max_distance_threshold", 50.0);
+  this->declare_parameter<double>("max_bbox_size", 5.0); // 기본값 5m로 설정
+  this->declare_parameter<int>("sor_mean_k", 20); // StatisticalOutlierRemoval의 MeanK 파라미터
+  this->declare_parameter<double>("sor_stddev_mul_thresh", 0.5); // StatisticalOutlierRemoval의 StddevMulThresh 파라미터
 
   this->get_parameter("input_yolo_topic", input_yolo_topic_);
   this->get_parameter("input_camera_info_topic", input_camera_info_topic_);
@@ -22,6 +27,10 @@ LidarBoundingBoxNode::LidarBoundingBoxNode(const rclcpp::NodeOptions & options)
   this->get_parameter("output_bounding_box_topic", output_bounding_box_topic_);
   this->get_parameter("camera_frame_id", camera_frame_id_);
   this->get_parameter("lidar_frame_id", lidar_frame_id_);
+  this->get_parameter("max_distance_threshold", max_distance_threshold_);
+  this->get_parameter("max_bbox_size", max_bbox_size_);
+  this->get_parameter("sor_mean_k", sor_mean_k_); // MeanK 파라미터 가져오기
+  this->get_parameter("sor_stddev_mul_thresh", sor_stddev_mul_thresh_); // StddevMulThresh 파라미터 가져오기
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -64,7 +73,7 @@ void LidarBoundingBoxNode::synchronized_callback(
   geometry_msgs::msg::TransformStamped transform_lidar_to_camera;
   try {
     transform_lidar_to_camera = tf_buffer_->lookupTransform(
-      camera_frame_id_, lidar_frame_id_, yolo_msg->header.stamp); // Use YOLO msg timestamp for TF lookup
+      camera_frame_id_, lidar_frame_id_, yolo_msg->header.stamp);
     RCLCPP_INFO(this->get_logger(), "[Synchronized Callback] Successfully looked up TF from %s to %s at timestamp %f.",
       lidar_frame_id_.c_str(), camera_frame_id_.c_str(), rclcpp::Time(yolo_msg->header.stamp).seconds());
   } catch (const tf2::TransformException & ex) {
@@ -78,6 +87,15 @@ void LidarBoundingBoxNode::synchronized_callback(
   pcl::fromROSMsg(*point_cloud_msg, *pcl_cloud);
   RCLCPP_INFO(this->get_logger(), "[Synchronized Callback] Converted PointCloud2 to PCL PointCloud with %zu points.", pcl_cloud->points.size());
 
+  // Apply Statistical Outlier Removal to filter noise
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+  sor.setInputCloud(pcl_cloud);
+  sor.setMeanK(sor_mean_k_); // 파라미터로 설정
+  sor.setStddevMulThresh(sor_stddev_mul_thresh_); // 파라미터로 설정
+  sor.filter(*cloud_filtered);
+  RCLCPP_INFO(this->get_logger(), "[Synchronized Callback] Applied outlier removal with MeanK=%d, StddevMulThresh=%.2f, filtered to %zu points.", sor_mean_k_, sor_stddev_mul_thresh_, cloud_filtered->points.size());
+
   visualization_msgs::msg::MarkerArray marker_array;
   int marker_id = 0;
 
@@ -90,7 +108,7 @@ void LidarBoundingBoxNode::synchronized_callback(
     // Project 3D points to 2D image plane and check if they fall within the 2D bounding box
     pcl::PointCloud<pcl::PointXYZ>::Ptr points_in_bbox(new pcl::PointCloud<pcl::PointXYZ>);
 
-    for (const auto & point : pcl_cloud->points)
+    for (const auto & point : cloud_filtered->points)
     {
       // Transform point from lidar frame to camera frame
       Eigen::Vector4d point_lidar(point.x, point.y, point.z, 1.0);
@@ -103,6 +121,15 @@ void LidarBoundingBoxNode::synchronized_callback(
 
       if (projected_point.z() > 0) // Ensure point is in front of camera
       {
+        // Calculate distance from lidar origin to the point
+        double distance = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2) + std::pow(point.z, 2));
+
+        // 추가적인 거리 필터링: 2D 바운딩 박스 중심에서 10m 이내 점만 사용
+        double center_distance = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
+        if (distance > max_distance_threshold_ || center_distance > 10.0) {
+          continue; // Skip points beyond thresholds
+        }
+
         double u = projected_point.x() / projected_point.z();
         double v = projected_point.y() / projected_point.z();
 
@@ -142,9 +169,18 @@ void LidarBoundingBoxNode::synchronized_callback(
     marker.pose.position.z = (min_pt.z + max_pt.z) / 2.0;
     marker.pose.orientation.w = 1.0; // No rotation for now, axis-aligned bounding box
 
-    marker.scale.x = max_pt.x - min_pt.x;
-    marker.scale.y = max_pt.y - min_pt.y;
-    marker.scale.z = max_pt.z - min_pt.z;
+    double bbox_size_x = max_pt.x - min_pt.x;
+    double bbox_size_y = max_pt.y - min_pt.y;
+    double bbox_size_z = max_pt.z - min_pt.z;
+
+    // 최대 크기 제한 적용
+    if (bbox_size_x > max_bbox_size_) bbox_size_x = max_bbox_size_;
+    if (bbox_size_y > max_bbox_size_) bbox_size_y = max_bbox_size_;
+    if (bbox_size_z > max_bbox_size_) bbox_size_z = max_bbox_size_;
+
+    marker.scale.x = bbox_size_x;
+    marker.scale.y = bbox_size_y;
+    marker.scale.z = bbox_size_z;
 
     // Ensure minimum scale to avoid issues with empty or flat boxes
     if (marker.scale.x < 0.01) marker.scale.x = 0.01;
