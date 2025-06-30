@@ -81,7 +81,7 @@ ros2 run tf2_ros static_transform_publisher 0.5 0.0 0.2 0.0 0.0 0.0 lidar_link c
 TF가 설정된 후, 다음 명령으로 노드를 실행할 수 있습니다:
 
 ```bash
-ros2 run lidar_bounding_box lidar_bounding_box_main
+ros2 launch lidar_bounding_box lidar_bounding_box.launch.py
 ```
 
 ### RViz에서 시각화
@@ -120,7 +120,3 @@ RViz를 실행하고 다음 토픽을 추가하여 3D 바운딩 박스와 클래
 ## 기여
 
 기여는 언제나 환영합니다! 버그 리포트, 기능 요청, 풀 리퀘스트 등 어떤 형태의 기여라도 좋습니다.
-
-## 라이선스
-
-[TODO: 라이선스 선언]
