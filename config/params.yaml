@@ -1,0 +1,8 @@
+lidar_bounding_box_node:
+  ros__parameters:
+    input_yolo_topic: "/yolo_result"
+    input_camera_info_topic: "/camera_info"
+    input_point_cloud_topic: "/point_cloud"
+    output_bounding_box_topic: "/lidar_bounding_box"
+    camera_frame_id: "camera_link"
+    lidar_frame_id: "lidar_link"
